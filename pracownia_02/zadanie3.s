@@ -11,7 +11,7 @@
 ; SHIFT CLK - portd 7
 ; LATCH CLK - portd 4
 
-.set timer_cycles_per_half_second, 15625
+.set timer_cycles_per_half_second, 15625; 31250
 
 .section .data
 screen_data:
@@ -82,8 +82,6 @@ start:
 	ldi r16, 0
 	st Z, r16
 
-	ldi r24, 4
-
 	call stopwatch_reset
 
 	sei
@@ -145,36 +143,19 @@ segments_next_digit:
 	load_register_Y segments_digit
 	load_register_Z patterns
 
-	; Shift r16 to select correct digit
-	ld r17, Y
-	ldi r16, 0x00
-
-	;ldi r18, 4								; 4
-	mov r18, r24							;
-
-	sub r18, r17							; 
-	sec	
-segments_next_digit_loop:
-	rol r16	
-	dec r18
-	brne segments_next_digit_loop
-
-	load_register_X segments_data
 	; Calculate currect digit pattern
 	ld r17, X
 	clc
 	add r30, r17
 	ldi r17, 0x00
-	adc r31, r17
+	adc r31, r17  
 
+
+	ldi r16, 0x08
 	lpm r17, Z
 	call segments_update
 
 	ret
-
-;reset_loop:
-;	ldi r24, 4
-;	call back_here
 
 ; Refresh (send next bit) to the mc74hc device
 ; Parameters: None
@@ -276,17 +257,11 @@ stopwatch_next:
 	sbrc r16, 5
 	jmp stopwatch_next_end
 
-	dec r24
-	cpi r24, 0
-	brne skip_next
-	ldi r24, 4
-skip_next:
-
 	; Increment current seconds count (wrap at 4)
 	load_register_Z stopwatch_seconds
 	ld r16, Z
 	inc r16
-	cpi r16, 4
+	cpi r16, 10
 	brne stopwatch_next_less_than_four
 	ldi r16, 0
 stopwatch_next_less_than_four:
@@ -302,4 +277,4 @@ stopwatch_next_end:
 
 ; Digit patterns for 7 segment
 patterns:
-	.byte 0xF9, 0xA4, 0xB0, 0x99
+	.byte 0xC0, 0xF9, 0xA4, 0xB0, 0x99, 0x92, 0x82, 0xF8, 0x80, 0x90

@@ -1,5 +1,7 @@
 .org 0x0000
 	jmp start		; Reset handler
+.org 0x0016
+	jmp pcint1_irq		; Pin Change Interrupt 1
 .org 0x0040
 	jmp timer0_ovf_irq 	; Timer0 Overflow Handler
 
@@ -11,7 +13,7 @@
 ; SHIFT CLK - portd 7
 ; LATCH CLK - portd 4
 
-.set timer_cycles_per_half_second, 15625
+.set timer_cycles_per_half_second, 312;6250;62500;31250
 
 .section .data
 screen_data:
@@ -26,14 +28,11 @@ shift_clk:
 stopwatch_value:
 	.space 2
 
-stopwatch_seconds:
-	.space 1
-
 segments_digit:
 	.space 1
 
 segments_data:
-	.space 2
+	.space 4
 
 .section .text
 
@@ -45,6 +44,23 @@ timer0_ovf_irq:
 	call segments_refresh
 	reti
 
+; Interrupt handler
+pcint1_irq:
+	lds r17, PINC
+pcint1_irq_option_1:
+
+	sbrc r17, 1					;  Skip if Bit in Register is Cleared
+	rjmp pcint1_irq_exit
+
+	load_register_Z segments_data
+	ldi r16, 0x00
+	st Z+, r16
+	st Z+, r16
+	st Z+, r16
+	st Z+, r16
+
+pcint1_irq_exit:
+	reti
 ; Reset Interrupt handler
 start:
 	load_register_16 SPH, SPL, _stack_top
@@ -73,16 +89,15 @@ start:
 	ldi r16, 0x00
 	st Z+, r16
 	st Z+, r16
+	st Z+, r16
+	st Z+, r16
 
 	load_register_Z screen_bit
 	ldi r16, -1
 	st Z, r16
-
-	load_register_Z stopwatch_seconds
-	ldi r16, 0
-	st Z, r16
-
-	ldi r24, 4
+	
+	load_register_8 PCICR, 0x02 			; Pin Change Interrupt Enable 2 ; enabled PCINT[23:16] pin
+	load_register_8 PCMSK1, 0x0E
 
 	call stopwatch_reset
 
@@ -139,7 +154,7 @@ segments_put_sdi:
 ; Put correct data on sdi pin
 ; Parameters: None
 ; Returns: None
-; Clobbers: r16, r17, r18, Z
+; Clobbers: r16, r17, r18, X, Y, Z
 segments_next_digit:
 	load_register_X segments_data
 	load_register_Y segments_digit
@@ -148,18 +163,21 @@ segments_next_digit:
 	; Shift r16 to select correct digit
 	ld r17, Y
 	ldi r16, 0x00
-
-	;ldi r18, 4								; 4
-	mov r18, r24							;
-
-	sub r18, r17							; 
-	sec	
+	ldi r18, 4
+	sub r18, r17
+	sec
 segments_next_digit_loop:
-	rol r16	
+	rol r16
 	dec r18
 	brne segments_next_digit_loop
 
-	load_register_X segments_data
+	; Calculate currect digit address
+	ld r17, Y
+	clc
+	add r26, r17
+	ldi r17, 0x00
+	adc r27, r17
+
 	; Calculate currect digit pattern
 	ld r17, X
 	clc
@@ -168,13 +186,18 @@ segments_next_digit_loop:
 	adc r31, r17
 
 	lpm r17, Z
+	andi r17, 0x7F
 	call segments_update
 
+	; Increment current digit
+	ld r16, Y
+	inc r16
+	cpi r16, 4
+	brne segments_next_digit_not_last_digit
+	ldi r16, 0
+segments_next_digit_not_last_digit:
+	st Y, r16
 	ret
-
-;reset_loop:
-;	ldi r24, 4
-;	call back_here
 
 ; Refresh (send next bit) to the mc74hc device
 ; Parameters: None
@@ -221,7 +244,7 @@ segments_refresh_end:
 ; 	r16 - segment selection
 ;	r17 - segments pattern
 ; Returns: None
-; Clobbers: r16, Z
+; Clobbers: r16, r17, Z
 segments_update:
 	load_register_Z screen_data
 	st Z+, r16
@@ -276,25 +299,42 @@ stopwatch_next:
 	sbrc r16, 5
 	jmp stopwatch_next_end
 
-	dec r24
-	cpi r24, 0
-	brne skip_next
-	ldi r24, 4
-skip_next:
-
-	; Increment current seconds count (wrap at 4)
-	load_register_Z stopwatch_seconds
+	; Increment first digit (wrap at 10)
+	load_register_Z segments_data
 	ld r16, Z
 	inc r16
-	cpi r16, 4
+	cpi r16, 10
 	brne stopwatch_next_less_than_four
 	ldi r16, 0
+	st Z+, r16
+
+	; Increment second digit (wrap at 10)
+	ld r16, Z
+	inc r16
+	cpi r16, 10
+	brne stopwatch_next_less_than_four
+	ldi r16, 0
+	st Z+, r16
+
+	; Increment third digit (wrap at 10)
+	ld r16, Z
+	inc r16
+	cpi r16, 10
+	brne stopwatch_next_less_than_four
+	ldi r16, 0
+
+	st Z+, r16
+	; Increment fourth digit (wrap at 10)
+	ld r16, Z
+	inc r16
+	cpi r16, 10
+	brne stopwatch_next_less_than_four
+	ldi r16, 0
+	st Z+, r16
+
 stopwatch_next_less_than_four:
 	st Z, r16
 
-	; Update display data
-	load_register_Z segments_data
-	st Z, 16
 stopwatch_next_end:
 	ret
 
@@ -302,4 +342,4 @@ stopwatch_next_end:
 
 ; Digit patterns for 7 segment
 patterns:
-	.byte 0xF9, 0xA4, 0xB0, 0x99
+	.byte 0xC0, 0xF9, 0xA4, 0xB0, 0x99, 0x92, 0x82, 0xF8, 0x80, 0x90
